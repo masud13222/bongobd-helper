@@ -77,16 +77,6 @@ async def cleanup(file_path, user_dir):
 async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /m command"""
     try:
-        # Create task for download process
-        task = asyncio.create_task(process_direct_download(update, context))
-        await task
-    except Exception as e:
-        print(f"Error in direct_dl_command: {e}")
-        await update.message.reply_text("❌ An error occurred!")
-
-async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process the actual download"""
-    try:
         # Check if command has arguments
         if not context.args:
             await update.message.reply_text(
@@ -94,7 +84,22 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                 "Use: /m <direct_link> -d<number>"
             )
             return
-            
+
+        # Create status message first
+        status_msg = await update.message.reply_text("⏳ Starting download...")
+        
+        # Create task but don't block
+        asyncio.create_task(
+            process_direct_download(update, context, status_msg)
+        )
+        
+    except Exception as e:
+        print(f"Error in direct_dl_command: {e}")
+        await update.message.reply_text("❌ An error occurred!")
+
+async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_TYPE, status_msg):
+    """Process the actual download"""
+    try:
         # Get direct link
         direct_link = context.args[0]
         

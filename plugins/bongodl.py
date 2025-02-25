@@ -121,14 +121,28 @@ async def cleanup(file_path, user_dir):
 async def bdl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /bdl command"""
     try:
-        # Create task for download process
-        task = asyncio.create_task(process_bongo_download(update, context))
-        await task
+        # Check command format
+        if len(context.args) < 4:
+            await update.message.reply_text(
+                "❌ Invalid format!\n\n"
+                "Use: /bdl <link> -n <filename> -d<number>\n"
+                "Example: /bdl https://example.m3u8 -n Movie.mp4 -d1"
+            )
+            return
+
+        # Create status message first
+        status_msg = await update.message.reply_text("⏳ Starting download...")
+        
+        # Create task but don't block
+        asyncio.create_task(
+            process_bongo_download(update, context, status_msg)
+        )
+        
     except Exception as e:
         print(f"Error in bdl_command: {e}")
         await update.message.reply_text("❌ An error occurred!")
 
-async def process_bongo_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def process_bongo_download(update: Update, context: ContextTypes.DEFAULT_TYPE, status_msg):
     """Process the actual download"""
     try:
         # Check command format
@@ -179,9 +193,6 @@ async def process_bongo_download(update: Update, context: ContextTypes.DEFAULT_T
         
         try:
             file_path = os.path.join(user_dir, filename)
-            
-            # Send initial message
-            status_msg = await update.message.reply_text("⏳ Starting download...")
             
             # Download video
             if not await download_bongo(url, file_path, status_msg):

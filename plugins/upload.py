@@ -99,23 +99,28 @@ async def cleanup(file_path, user_dir):
 async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /upload command"""
     try:
-        # Create task for upload process
-        task = asyncio.create_task(process_upload(update, context))
-        await task
-    except Exception as e:
-        print(f"Error in upload_command: {e}")
-        await update.message.reply_text("❌ An error occurred!")
-
-async def process_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process the actual upload"""
-    try:
         # Check if file is attached
         if not update.message.document:
             await update.message.reply_text(
                 "❌ Please send a file to upload!"
             )
             return
-            
+
+        # Create status message first
+        status_msg = await update.message.reply_text("⏳ Starting upload...")
+        
+        # Create task but don't block
+        asyncio.create_task(
+            process_upload(update, context, status_msg)
+        )
+        
+    except Exception as e:
+        print(f"Error in upload_command: {e}")
+        await update.message.reply_text("❌ An error occurred!")
+
+async def process_upload(update: Update, context: ContextTypes.DEFAULT_TYPE, status_msg):
+    """Process the actual upload"""
+    try:
         # Get user's drive settings
         user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
         
@@ -147,7 +152,7 @@ async def process_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_path = os.path.join(user_dir, file_name)
             
             # Send status
-            status_msg = await update.message.reply_text("⏳ Downloading file...")
+            await status_msg.edit_text("⏳ Downloading file...")
             
             # Download
             await file.download_to_drive(file_path)
