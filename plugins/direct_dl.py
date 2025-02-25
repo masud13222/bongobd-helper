@@ -224,15 +224,32 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         
         # After successful upload, handle rename if requested
         if should_rename:
-            # Show upload success first
-            await status_msg.edit_text("✅ File Uploaded Successfully!")
-            await asyncio.sleep(1)
-            
-            # Then call rename
-            new_context = context
-            new_context.args = [drive_link]
-            await rename_command(update, new_context)
+            try:
+                # Show upload success first
+                await status_msg.edit_text("✅ File Uploaded Successfully!")
+                await asyncio.sleep(1)
+                
+                # Create new context for rename
+                from telegram.ext import CallbackContext
+                new_context = CallbackContext(application=context.application)
+                new_context.args = [drive_link]  # Pass only the drive link
+                
+                # Call rename command
+                await rename_command(update, new_context)
+            except Exception as e:
+                print(f"Error in rename process: {e}")
+                # If rename fails, show normal success message
+                await status_msg.edit_text(
+                    "✅ File transferred successfully!\n\n"
+                    f"Name: <code>{file.get('name')}</code>\n"
+                    f"Size: {file_size}\n"
+                    f"Drive: {drive_name}\n"
+                    f"Link: <code>{drive_link}</code>",
+                    parse_mode='HTML',
+                    reply_markup=keyboard
+                )
         else:
+            # Send normal success message
             await status_msg.edit_text(
                 "✅ File transferred successfully!\n\n"
                 f"Name: <code>{file.get('name')}</code>\n"
