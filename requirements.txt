@@ -1,0 +1,11 @@
+python-telegram-bot[job-queue]==20.8
+pymongo==4.6.2
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.121.0
+python-dotenv==1.0.1
+aiofiles
+aiohttp>=3.9.1
+aiohttp[speedups]
+yt-dlp
+pycryptodomex
