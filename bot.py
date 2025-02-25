@@ -24,20 +24,11 @@ async def web_server():
     web_app = web.Application()
     runner = web.AppRunner(web_app)
     await runner.setup()
-    await web.TCPSite(runner, '0.0.0.0', 8080).start()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    return runner, site
 
-def is_owner(update: Update):
-    """Check if user is owner"""
-    return update.effective_user.id in OWNER_IDS
-
-async def owner_check(update: Update, context):
-    """Check if user is owner before executing command"""
-    if not is_owner(update):
-        await update.message.reply_text("❌ Only bot owners can use this command!")
-        return False
-    return True
-
-async def main():
+async def run_bot():
     # Create application
     application = Application.builder().token(os.getenv('BOT_TOKEN')).build()
 
@@ -62,13 +53,30 @@ async def main():
     # Add message handler for text inputs
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(OWNER_IDS), handle_text_input))
 
-    # Start web server
-    await web_server()
-
-    # Run bot
+    # Start bot
     await application.initialize()
     await application.start()
+    print("Bot Started...")
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+def is_owner(update: Update):
+    """Check if user is owner"""
+    return update.effective_user.id in OWNER_IDS
+
+async def owner_check(update: Update, context):
+    """Check if user is owner before executing command"""
+    if not is_owner(update):
+        await update.message.reply_text("❌ Only bot owners can use this command!")
+        return False
+    return True
+
+async def main():
+    # Start both web server and bot
+    runner, site = await web_server()
+    try:
+        await run_bot()
+    finally:
+        await runner.cleanup()
 
 if __name__ == "__main__":
     import asyncio
