@@ -9,7 +9,7 @@ from plugins.upload import upload_to_drive, format_size, format_speed
 from pymongo import MongoClient
 import time
 import asyncio
-from plugins.rename import rename_command
+import re
 
 # MongoDB setup
 MONGO_URI = os.getenv('MONGO_URI')
@@ -229,13 +229,58 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                 await status_msg.edit_text("✅ File Uploaded Successfully!")
                 await asyncio.sleep(1)
                 
-                # Create new context for rename
-                from telegram.ext import CallbackContext
-                new_context = CallbackContext(application=context.application)
-                new_context.args = [drive_link]  # Pass only the drive link
+                # Get user settings for rename
+                user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
+                prefix = user_data.get('prefix', '')
+                suffix = user_data.get('suffix', '')
+                remnames = user_data.get('remnames', [])
                 
-                # Call rename command
-                await rename_command(update, new_context)
+                # Get current file name
+                old_name = file.get('name', '')
+                old_ext = old_name.split('.')[-1] if '.' in old_name else ''
+                
+                # Process name with prefix/suffix
+                new_name = old_name
+                
+                # First check and remove any matching remnames
+                if remnames:
+                    remnames.sort(key=len, reverse=True)
+                    for remname in remnames:
+                        if remname in new_name:
+                            new_name = new_name.replace(remname, "")
+                
+                # Get name without extension
+                name_part = new_name.rsplit('.', 1)[0] if '.' in new_name else new_name
+                
+                # Add prefix if exists
+                if prefix:
+                    name_part = f"{prefix} - {name_part}"
+                    
+                # Add suffix if exists
+                if suffix:
+                    name_part = f"{name_part} {suffix}"
+                    
+                # Add back extension
+                new_name = f"{name_part}.{old_ext}" if old_ext else name_part
+                
+                # Clean up multiple spaces
+                new_name = re.sub(r'\s+', ' ', new_name).strip()
+                
+                # Update file metadata
+                service.files().update(
+                    fileId=file_id,
+                    body={'name': new_name},
+                    supportsTeamDrives=True
+                ).execute()
+                
+                # Show rename success message
+                await status_msg.edit_text(
+                    "✅ File renamed successfully!\n\n"
+                    f"Old name: <code>{old_name}</code>\n"
+                    f"New name: <code>{new_name}</code>",
+                    parse_mode='HTML'
+                )
+                
             except Exception as e:
                 print(f"Error in rename process: {e}")
                 # If rename fails, show normal success message
