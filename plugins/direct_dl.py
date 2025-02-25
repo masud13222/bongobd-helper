@@ -235,50 +235,61 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                 suffix = user_data.get('suffix', '')
                 remnames = user_data.get('remnames', [])
                 
+                # Get file metadata
+                file = service.files().get(
+                    fileId=file_id,
+                    fields='name',
+                    supportsAllDrives=True
+                ).execute()
+                
                 # Get current file name
                 old_name = file.get('name', '')
-                old_ext = old_name.split('.')[-1] if '.' in old_name else ''
                 
-                # Process name with prefix/suffix
-                new_name = old_name
+                # Get extension
+                old_ext = old_name.rsplit('.', 1)[1] if '.' in old_name else ''
                 
-                # First check and remove any matching remnames
+                # Get name without extension for processing
+                new_name = old_name.rsplit('.', 1)[0] if '.' in old_name else old_name
+                
+                # Process remnames first
                 if remnames:
                     remnames.sort(key=len, reverse=True)
                     for remname in remnames:
                         if remname in new_name:
-                            new_name = new_name.replace(remname, "")
+                            new_name = new_name.replace(remname, '')
                 
-                # Get name without extension
-                name_part = new_name.rsplit('.', 1)[0] if '.' in new_name else new_name
-                
-                # Add prefix if exists
+                # Add prefix
                 if prefix:
-                    name_part = f"{prefix} - {name_part}"
+                    new_name = f"{prefix} - {new_name}"
                     
-                # Add suffix if exists
+                # Add suffix
                 if suffix:
-                    name_part = f"{name_part} {suffix}"
+                    new_name = f"{new_name} {suffix}"
                     
-                # Add back extension
-                new_name = f"{name_part}.{old_ext}" if old_ext else name_part
-                
                 # Clean up multiple spaces
                 new_name = re.sub(r'\s+', ' ', new_name).strip()
                 
-                # Update file metadata
+                # Add back extension
+                if old_ext:
+                    new_name = f"{new_name}.{old_ext}"
+                    
+                # Update file
                 service.files().update(
                     fileId=file_id,
                     body={'name': new_name},
-                    supportsTeamDrives=True
+                    supportsAllDrives=True
                 ).execute()
                 
                 # Show rename success message
                 await status_msg.edit_text(
                     "✅ File renamed successfully!\n\n"
                     f"Old name: <code>{old_name}</code>\n"
-                    f"New name: <code>{new_name}</code>",
-                    parse_mode='HTML'
+                    f"New name: <code>{new_name}</code>\n"
+                    f"Size: {file_size}\n"
+                    f"Drive: {drive_name}\n"
+                    f"Link: <code>{drive_link}</code>",
+                    parse_mode='HTML',
+                    reply_markup=keyboard
                 )
                 
             except Exception as e:
