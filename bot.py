@@ -2,7 +2,6 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
-from aiohttp import web
 from plugins.uset import uset_command, handle_callbacks, handle_text_input
 from plugins.start import start_command, help_command
 from plugins.rename import rename_command
@@ -12,6 +11,8 @@ from plugins.upload import upload_command
 from plugins.direct_dl import direct_dl_command
 from plugins.delete import del_command
 from plugins.bongodl import bdl_command
+import socket
+from threading import Thread
 
 # Load environment variables
 load_dotenv()
@@ -19,16 +20,36 @@ load_dotenv()
 # Get owner IDs from env
 OWNER_IDS = list(map(int, os.getenv('OWNER_IDS', '').split(',')))
 
-# Setup web app
-async def web_server():
-    web_app = web.Application()
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    return runner, site
+# TCP Health Check Server
+def tcp_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(('0.0.0.0', 8080))
+    server.listen(1)
+    
+    while True:
+        try:
+            client, _ = server.accept()
+            client.send(b'OK')
+            client.close()
+        except:
+            pass
 
-async def run_bot():
+def is_owner(update: Update):
+    """Check if user is owner"""
+    return update.effective_user.id in OWNER_IDS
+
+async def owner_check(update: Update, context):
+    """Check if user is owner before executing command"""
+    if not is_owner(update):
+        await update.message.reply_text("❌ Only bot owners can use this command!")
+        return False
+    return True
+
+def main():
+    # Start TCP server in thread
+    Thread(target=tcp_server, daemon=True).start()
+
     # Create application
     application = Application.builder().token(os.getenv('BOT_TOKEN')).build()
 
@@ -53,34 +74,9 @@ async def run_bot():
     # Add message handler for text inputs
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(OWNER_IDS), handle_text_input))
 
-    # Start bot
-    await application.initialize()
-    await application.start()
-    print("Bot Started...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-def is_owner(update: Update):
-    """Check if user is owner"""
-    return update.effective_user.id in OWNER_IDS
-
-async def owner_check(update: Update, context):
-    """Check if user is owner before executing command"""
-    if not is_owner(update):
-        await update.message.reply_text("❌ Only bot owners can use this command!")
-        return False
-    return True
-
-async def main():
-    # Start both web server and bot
-    runner, site = await web_server()
-    try:
-        await run_bot()
-    finally:
-        await runner.cleanup()
+    # Run bot
+    print("Bot started...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    import asyncio
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass 
+    main() 
