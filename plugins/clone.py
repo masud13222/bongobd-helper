@@ -229,7 +229,8 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "✅ File cloned successfully!\n\n"
                 f"Name: <code>{file.get('name')}</code>\n"
-                f"Drive: {drive_name}",
+                f"Drive: {drive_name}\n"
+                f"Link: <code>https://drive.google.com/file/d/{copied_file['id']}/view</code>",
                 parse_mode='HTML'
             )
             
