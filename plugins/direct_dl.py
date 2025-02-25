@@ -23,9 +23,12 @@ PROGRESS_UPDATE_INTERVAL = 3  # Change this value to update progress faster or s
 async def download_file(url, file_path, status_msg):
     """Download file from direct link with progress"""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
+        # Increase timeout and chunk size
+        timeout = aiohttp.ClientTimeout(total=None, connect=60, sock_read=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, allow_redirects=True) as response:
                 if response.status != 200:
+                    print(f"Download failed with status {response.status}")
                     return False
                     
                 # Get file size and name
@@ -37,27 +40,33 @@ async def download_file(url, file_path, status_msg):
                 start_time = time.time()
                 last_update_time = 0
                 
+                # Increase buffer size for faster downloads
                 async with aiofiles.open(file_path, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(1024*1024):
-                        await f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        # Calculate speed and progress
-                        current_time = time.time()
-                        elapsed = current_time - start_time
-                        speed = downloaded / elapsed if elapsed > 0 else 0
-                        progress = (downloaded / file_size) * 100 if file_size > 0 else 0
-                        
-                        # Update status based on interval
-                        if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
-                            status_text = (
-                                f"📥 Downloading: {file_name}\n"
-                                f"Progress: {progress:.1f}%\n"
-                                f"Size: {await format_size(downloaded)} / {await format_size(file_size)}\n"
-                                f"Speed: {await format_speed(speed)}"
-                            )
-                            await status_msg.edit_text(status_text)
-                            last_update_time = current_time
+                    async for chunk in response.content.iter_chunked(8*1024*1024):  # 8MB chunks
+                        try:
+                            await f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            # Calculate speed and progress
+                            current_time = time.time()
+                            elapsed = current_time - start_time
+                            speed = downloaded / elapsed if elapsed > 0 else 0
+                            progress = (downloaded / file_size) * 100 if file_size > 0 else 0
+                            
+                            # Update status based on interval
+                            if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
+                                status_text = (
+                                    f"📥 Downloading: {file_name}\n"
+                                    f"Progress: {progress:.1f}%\n"
+                                    f"Size: {await format_size(downloaded)} / {await format_size(file_size)}\n"
+                                    f"Speed: {await format_speed(speed)}"
+                                )
+                                await status_msg.edit_text(status_text)
+                                last_update_time = current_time
+                                
+                        except Exception as chunk_error:
+                            print(f"Chunk error: {chunk_error}")
+                            continue
                             
         return True
     except Exception as e:
@@ -99,6 +108,9 @@ async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_TYPE, status_msg):
     """Process the actual download"""
+    file_path = None
+    user_dir = None
+    
     try:
         # Get direct link
         direct_link = context.args[0]
@@ -130,7 +142,6 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         # Create user directory
         user_dir = os.path.join('downloads', str(update.effective_user.id))
         os.makedirs(user_dir, exist_ok=True)
-        file_path = None
         
         # Get filename from URL
         file_name = os.path.basename(direct_link.split('?')[0])
@@ -153,12 +164,19 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         
         file_path = os.path.join(user_dir, file_name)
         
-        # Download file
-        if not await download_file(direct_link, file_path, status_msg):
-            await status_msg.edit_text("❌ Failed to download file!")
-            await cleanup(file_path, user_dir)
-            return
-            
+        # Add retry logic for downloads
+        max_retries = 3
+        for retry in range(max_retries):
+            if await download_file(direct_link, file_path, status_msg):
+                break
+            elif retry < max_retries - 1:
+                await status_msg.edit_text(f"⚠️ Download failed, retrying... ({retry + 1}/{max_retries})")
+                await asyncio.sleep(2)
+            else:
+                await status_msg.edit_text("❌ Failed to download file after multiple attempts!")
+                await cleanup(file_path, user_dir)
+                return
+                
         await status_msg.edit_text("⏳ Uploading to Google Drive...")
         
         # Get Drive service
@@ -200,5 +218,5 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         print(f"Error in process_direct_download: {e}")
         await status_msg.edit_text("❌ An error occurred!")
-        if file_path:
+        if file_path and user_dir:
             await cleanup(file_path, user_dir) 
