@@ -6,6 +6,7 @@ from plugins.clone import get_drive_service
 from pymongo import MongoClient
 import time
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import asyncio
 
 # MongoDB setup
 MONGO_URI = os.getenv('MONGO_URI')
@@ -98,11 +99,20 @@ async def cleanup(file_path, user_dir):
 async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /upload command"""
     try:
+        # Create task for upload process
+        task = asyncio.create_task(process_upload(update, context))
+        await task
+    except Exception as e:
+        print(f"Error in upload_command: {e}")
+        await update.message.reply_text("❌ An error occurred!")
+
+async def process_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process the actual upload"""
+    try:
         # Check if file is attached
         if not update.message.document:
             await update.message.reply_text(
-                "❌ Please send a file with the command!\n\n"
-                "Use: /upload -d<number>"
+                "❌ Please send a file to upload!"
             )
             return
             

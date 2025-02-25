@@ -8,6 +8,7 @@ from plugins.clone import get_drive_service
 from plugins.upload import upload_to_drive, format_size, format_speed
 from pymongo import MongoClient
 import time
+import asyncio
 
 # MongoDB setup
 MONGO_URI = os.getenv('MONGO_URI')
@@ -75,6 +76,16 @@ async def cleanup(file_path, user_dir):
 
 async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /m command"""
+    try:
+        # Create task for download process
+        task = asyncio.create_task(process_direct_download(update, context))
+        await task
+    except Exception as e:
+        print(f"Error in direct_dl_command: {e}")
+        await update.message.reply_text("❌ An error occurred!")
+
+async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process the actual download"""
     try:
         # Check if command has arguments
         if not context.args:
@@ -182,7 +193,7 @@ async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
     except Exception as e:
-        print(f"Error in direct_dl_command: {e}")
+        print(f"Error in process_direct_download: {e}")
         await status_msg.edit_text("❌ An error occurred!")
         if file_path:
             await cleanup(file_path, user_dir) 

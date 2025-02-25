@@ -121,6 +121,16 @@ async def cleanup(file_path, user_dir):
 async def bdl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /bdl command"""
     try:
+        # Create task for download process
+        task = asyncio.create_task(process_bongo_download(update, context))
+        await task
+    except Exception as e:
+        print(f"Error in bdl_command: {e}")
+        await update.message.reply_text("❌ An error occurred!")
+
+async def process_bongo_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process the actual download"""
+    try:
         # Check command format
         if len(context.args) < 4:
             await update.message.reply_text(
