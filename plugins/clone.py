@@ -10,6 +10,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from plugins.check import check_drive_access
+from plugins.rename import rename_command
 
 # Load environment variables
 load_dotenv()
@@ -145,16 +146,24 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Build help message with available drives
             help_msg = "❌ Invalid format!\n\nUse:\n"
             for i in range(1, 7):  # Check all 6 drives
-                drive_key = f'drive_{i:02d}'  # drive_01, drive_02, etc.
+                drive_key = f'drive_{i:02d}'
                 if user_data.get(drive_key):
                     drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
                     help_msg += f"• /c <file_link> -d{i} - Clone to {drive_name}\n"
-                
+                    help_msg += f"• /c <file_link> -d{i} -r - Clone and auto rename\n"
+            
             if len(help_msg) == 27:  # Only has header
                 help_msg += "\nNo drives set! Use /uset command to set drive folders first."
                 
             await update.message.reply_text(help_msg)
             return
+            
+        # Check for rename flag
+        should_rename = False
+        if '-r' in context.args:
+            should_rename = True
+            # Remove -r from args
+            context.args = [arg for arg in context.args if arg != '-r']
             
         # Get file ID from URL
         file_id = extract_id(context.args[0])
@@ -226,13 +235,33 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 supportsAllDrives=True
             ).execute()
             
-            await update.message.reply_text(
-                "✅ File cloned successfully!\n\n"
-                f"Name: <code>{file.get('name')}</code>\n"
-                f"Drive: {drive_name}\n"
-                f"Link: <code>https://drive.google.com/file/d/{copied_file['id']}/view</code>",
-                parse_mode='HTML'
-            )
+            # Get file size
+            file = service.files().get(
+                fileId=copied_file['id'],
+                fields='name, size',
+                supportsAllDrives=True
+            ).execute()
+            
+            file_size = format_size(int(file.get('size', 0)))
+            
+            # After successful clone, handle rename if requested
+            if should_rename:
+                # Create new context args for rename
+                new_context = context
+                new_context.args = [f"https://drive.google.com/file/d/{copied_file['id']}/view"]
+                
+                # Call rename command
+                await rename_command(update, new_context)
+            else:
+                # Send normal success message
+                await update.message.reply_text(
+                    "✅ File cloned successfully!\n\n"
+                    f"Name: <code>{file.get('name')}</code>\n"
+                    f"Size: {file_size}\n"
+                    f"Drive: {drive_name}\n"
+                    f"Link: <code>https://drive.google.com/file/d/{copied_file['id']}/view</code>",
+                    parse_mode='HTML'
+                )
             
         except Exception as e:
             await update.message.reply_text(

@@ -9,6 +9,7 @@ from plugins.upload import upload_to_drive, format_size, format_speed
 from pymongo import MongoClient
 import time
 import asyncio
+from plugins.rename import rename_command
 
 # MongoDB setup
 MONGO_URI = os.getenv('MONGO_URI')
@@ -90,7 +91,9 @@ async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not context.args:
             await update.message.reply_text(
                 "❌ Please provide direct link and drive number!\n\n"
-                "Use: /m <direct_link> -d<number>"
+                "Use:\n"
+                "• /m <direct_link> -d<number> - Upload to drive\n"
+                "• /m <direct_link> -d<number> -r - Upload and auto rename"
             )
             return
 
@@ -112,9 +115,16 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
     user_dir = None
     
     try:
-        # Get direct link
+        # Get direct link and check for rename flag
         direct_link = context.args[0]
+        should_rename = False
         
+        # Check for -r flag
+        if '-r' in context.args:
+            should_rename = True
+            # Remove -r from args
+            context.args = [arg for arg in context.args if arg != '-r']
+            
         # Get user's drive settings
         user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
         
@@ -200,21 +210,41 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         file_id = file.get('id')
         drive_link = f"https://drive.google.com/file/d/{file_id}/view"
         
+        # Get file size
+        file = service.files().get(
+            fileId=file_id,
+            fields='name, size',
+            supportsAllDrives=True
+        ).execute()
+
+        file_size = await format_size(int(file.get('size', 0)))
+        
         # Create view button
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 View File", url=drive_link)]
         ])
         
-        # Send success message with button
-        await status_msg.edit_text(
-            "✅ File transferred successfully!\n\n"
-            f"Name: <code>{file.get('name')}</code>\n"
-            f"Drive: {drive_name}",
-            parse_mode='HTML',
-            reply_markup=keyboard
-        )
-        
+        # After successful upload, handle rename if requested
+        if should_rename:
+            # Create new context args for rename
+            new_context = context
+            new_context.args = [drive_link]  # Pass only the drive link
+            
+            # Call rename command
+            await rename_command(update, new_context)
+        else:
+            # Send normal success message
+            await status_msg.edit_text(
+                "✅ File transferred successfully!\n\n"
+                f"Name: <code>{file.get('name')}</code>\n"
+                f"Size: {file_size}\n"
+                f"Drive: {drive_name}\n"
+                f"Link: <code>{drive_link}</code>",
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+            
     except Exception as e:
         print(f"Error in process_direct_download: {e}")
         await status_msg.edit_text("❌ An error occurred!")

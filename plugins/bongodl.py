@@ -223,6 +223,15 @@ async def process_bongo_download(update: Update, context: ContextTypes.DEFAULT_T
             file_id = file.get('id')
             drive_link = f"https://drive.google.com/file/d/{file_id}/view"
             
+            # Get file size
+            file = service.files().get(
+                fileId=file_id,
+                fields='name, size',
+                supportsAllDrives=True
+            ).execute()
+
+            file_size = await format_size(int(file.get('size', 0)))
+            
             # Create view button
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             keyboard = InlineKeyboardMarkup([
@@ -233,7 +242,9 @@ async def process_bongo_download(update: Update, context: ContextTypes.DEFAULT_T
             await status_msg.edit_text(
                 "✅ File transferred successfully!\n\n"
                 f"Name: <code>{file.get('name')}</code>\n"
-                f"Drive: {drive_name}",
+                f"Size: {file_size}\n"
+                f"Drive: {drive_name}\n"
+                f"Link: <code>{drive_link}</code>",
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
