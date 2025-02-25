@@ -24,9 +24,14 @@ PROGRESS_UPDATE_INTERVAL = 3  # Change this value to update progress faster or s
 async def download_file(url, file_path, status_msg):
     """Download file from direct link with progress"""
     try:
+        # Create downloads directory if not exists
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
         # Increase timeout and chunk size
-        timeout = aiohttp.ClientTimeout(total=None, connect=60, sock_read=60)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        timeout = aiohttp.ClientTimeout(total=None, connect=120, sock_read=120)
+        conn = aiohttp.TCPConnector(force_close=True)
+        
+        async with aiohttp.ClientSession(timeout=timeout, connector=conn) as session:
             async with session.get(url, allow_redirects=True) as response:
                 if response.status != 200:
                     print(f"Download failed with status {response.status}")
@@ -45,31 +50,38 @@ async def download_file(url, file_path, status_msg):
                 async with aiofiles.open(file_path, 'wb') as f:
                     async for chunk in response.content.iter_chunked(8*1024*1024):  # 8MB chunks
                         try:
-                            await f.write(chunk)
-                            downloaded += len(chunk)
-                            
-                            # Calculate speed and progress
-                            current_time = time.time()
-                            elapsed = current_time - start_time
-                            speed = downloaded / elapsed if elapsed > 0 else 0
-                            progress = (downloaded / file_size) * 100 if file_size > 0 else 0
-                            
-                            # Update status based on interval
-                            if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
-                                status_text = (
-                                    f"📥 Downloading: {file_name}\n"
-                                    f"Progress: {progress:.1f}%\n"
-                                    f"Size: {await format_size(downloaded)} / {await format_size(file_size)}\n"
-                                    f"Speed: {await format_speed(speed)}"
-                                )
-                                await status_msg.edit_text(status_text)
-                                last_update_time = current_time
+                            if chunk:  # Filter out empty chunks
+                                await f.write(chunk)
+                                downloaded += len(chunk)
                                 
+                                # Calculate speed and progress
+                                current_time = time.time()
+                                elapsed = current_time - start_time
+                                speed = downloaded / elapsed if elapsed > 0 else 0
+                                progress = (downloaded / file_size) * 100 if file_size > 0 else 0
+                                
+                                # Update status based on interval
+                                if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
+                                    status_text = (
+                                        f"📥 Downloading: {file_name}\n"
+                                        f"Progress: {progress:.1f}%\n"
+                                        f"Size: {await format_size(downloaded)} / {await format_size(file_size)}\n"
+                                        f"Speed: {await format_speed(speed)}"
+                                    )
+                                    await status_msg.edit_text(status_text)
+                                    last_update_time = current_time
+                                    
                         except Exception as chunk_error:
                             print(f"Chunk error: {chunk_error}")
                             continue
                             
+                # Verify downloaded size
+                if downloaded == 0 or (file_size > 0 and downloaded < file_size):
+                    print(f"Incomplete download: {downloaded}/{file_size} bytes")
+                    return False
+                            
         return True
+        
     except Exception as e:
         print(f"Error downloading file: {e}")
         return False
