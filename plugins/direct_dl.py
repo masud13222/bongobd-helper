@@ -10,6 +10,7 @@ from pymongo import MongoClient
 import time
 import asyncio
 import re
+from urllib.parse import unquote
 
 # MongoDB setup
 MONGO_URI = os.getenv('MONGO_URI')
@@ -89,12 +90,46 @@ async def download_file(url, file_path, status_msg):
 async def cleanup(file_path, user_dir):
     """Clean up downloaded files"""
     try:
+        # Remove file if exists
         if os.path.exists(file_path):
             os.remove(file_path)
-        if os.path.exists(user_dir):
+            
+        # Remove user directory if empty
+        user_dir = os.path.dirname(file_path)
+        if os.path.exists(user_dir) and not os.listdir(user_dir):
             os.rmdir(user_dir)
+            
+        # Remove downloads directory if empty
+        downloads_dir = os.path.dirname(user_dir)
+        if os.path.exists(downloads_dir) and not os.listdir(downloads_dir):
+            os.rmdir(downloads_dir)
+            
     except Exception as e:
         print(f"Error in cleanup: {e}")
+
+async def send_success_message(status_msg, file, file_size, drive_name, drive_link, keyboard, is_renamed=False, old_name=None, new_name=None):
+    """Send success message with consistent format"""
+    if is_renamed:
+        await status_msg.edit_text(
+            "✅ File renamed successfully!\n\n"
+            f"Old name: <code>{old_name}</code>\n"
+            f"New name: <code>{new_name}</code>\n"
+            f"Size: {file_size}\n"
+            f"Drive: {drive_name}\n"
+            f"Link: <code>{drive_link}</code>",
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+    else:
+        await status_msg.edit_text(
+            "✅ File transferred successfully!\n\n"
+            f"Name: <code>{file.get('name')}</code>\n"
+            f"Size: {file_size}\n"
+            f"Drive: {drive_name}\n"
+            f"Link: <code>{drive_link}</code>",
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
 
 async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -150,8 +185,8 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
             await message.reply_text("❌ Invalid or unset drive!")
             return
             
-        # Get filename from URL
-        file_name = os.path.basename(direct_link.split('?')[0])
+        # Get filename from URL and decode it
+        file_name = unquote(os.path.basename(direct_link.split('?')[0]))
         
         # If filename is too long or same as URL, use a default name
         if len(file_name) > 100 or file_name == direct_link:
@@ -225,31 +260,30 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         # After successful upload, handle rename if requested
         if should_rename:
             try:
-                # Show upload success first
-                await status_msg.edit_text("✅ File Uploaded Successfully!")
-                await asyncio.sleep(1)
-                
-                # Get user settings for rename
+                # Get user settings
                 user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
                 prefix = user_data.get('prefix', '')
                 suffix = user_data.get('suffix', '')
                 remnames = user_data.get('remnames', [])
                 
-                # Get file metadata
+                # Get original file info
                 file = service.files().get(
                     fileId=file_id,
                     fields='name',
-                    supportsAllDrives=True
+                    supportsTeamDrives=True
                 ).execute()
                 
-                # Get current file name
                 old_name = file.get('name', '')
                 
-                # Get extension
-                old_ext = old_name.rsplit('.', 1)[1] if '.' in old_name else ''
-                
                 # Get name without extension for processing
-                new_name = old_name.rsplit('.', 1)[0] if '.' in old_name else old_name
+                if '.' in old_name:
+                    name_part = old_name.rsplit('.', 1)[0]
+                    ext = '.' + old_name.rsplit('.', 1)[1]
+                else:
+                    name_part = old_name
+                    ext = ''
+                    
+                new_name = name_part
                 
                 # Process remnames first
                 if remnames:
@@ -261,40 +295,48 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                 # Add prefix
                 if prefix:
                     new_name = f"{prefix} - {new_name}"
-                    
+                
                 # Add suffix
                 if suffix:
                     new_name = f"{new_name} {suffix}"
-                    
+                
                 # Clean up multiple spaces
                 new_name = re.sub(r'\s+', ' ', new_name).strip()
                 
                 # Add back extension
-                if old_ext:
-                    new_name = f"{new_name}.{old_ext}"
-                    
-                # Update file
-                service.files().update(
-                    fileId=file_id,
-                    body={'name': new_name},
-                    supportsAllDrives=True
-                ).execute()
+                final_name = new_name + ext
                 
-                # Show rename success message
-                await status_msg.edit_text(
-                    "✅ File renamed successfully!\n\n"
-                    f"Old name: <code>{old_name}</code>\n"
-                    f"New name: <code>{new_name}</code>\n"
-                    f"Size: {file_size}\n"
-                    f"Drive: {drive_name}\n"
-                    f"Link: <code>{drive_link}</code>",
-                    parse_mode='HTML',
-                    reply_markup=keyboard
-                )
+                # Update file only if name changed
+                if final_name != old_name:
+                    service.files().update(
+                        fileId=file_id,
+                        body={'name': final_name},
+                        supportsTeamDrives=True
+                    ).execute()
+                    
+                    await status_msg.edit_text(
+                        "✅ File renamed successfully!\n\n"
+                        f"Old name: <code>{old_name}</code>\n"
+                        f"New name: <code>{final_name}</code>\n"
+                        f"Size: {file_size}\n"
+                        f"Drive: {drive_name}\n"
+                        f"Link: <code>{drive_link}</code>",
+                        parse_mode='HTML',
+                        reply_markup=keyboard
+                    )
+                else:
+                    await status_msg.edit_text(
+                        "✅ File transferred successfully!\n\n"
+                        f"Name: <code>{file.get('name')}</code>\n"
+                        f"Size: {file_size}\n"
+                        f"Drive: {drive_name}\n"
+                        f"Link: <code>{drive_link}</code>",
+                        parse_mode='HTML',
+                        reply_markup=keyboard
+                    )
                 
             except Exception as e:
                 print(f"Error in rename process: {e}")
-                # If rename fails, show normal success message
                 await status_msg.edit_text(
                     "✅ File transferred successfully!\n\n"
                     f"Name: <code>{file.get('name')}</code>\n"
@@ -306,14 +348,13 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                 )
         else:
             # Send normal success message
-            await status_msg.edit_text(
-                "✅ File transferred successfully!\n\n"
-                f"Name: <code>{file.get('name')}</code>\n"
-                f"Size: {file_size}\n"
-                f"Drive: {drive_name}\n"
-                f"Link: <code>{drive_link}</code>",
-                parse_mode='HTML',
-                reply_markup=keyboard
+            await send_success_message(
+                status_msg=status_msg,
+                file=file,
+                file_size=file_size,
+                drive_name=drive_name,
+                drive_link=drive_link,
+                keyboard=keyboard
             )
             
     except Exception as e:

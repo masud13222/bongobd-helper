@@ -10,7 +10,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from plugins.check import check_drive_access
-from plugins.rename import rename_command
+
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +21,14 @@ DB_NAME = os.getenv('DB_NAME')
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 users_collection = db['users']
+
+def format_size(size):
+    """Format size in bytes to human readable"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} TB"
 
 def extract_id(url):
     """Extract file/folder ID from Google Drive URL"""
@@ -244,24 +252,87 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             file_size = format_size(int(file.get('size', 0)))
             
-            # After successful clone, handle rename if requested
+            # After successful clone, handle rename or show success
             if should_rename:
-                # Create new context args for rename
-                new_context = context
-                new_context.args = [f"https://drive.google.com/file/d/{copied_file['id']}/view"]
-                
-                # Call rename command
-                await rename_command(update, new_context)
-            else:
-                # Send normal success message
-                await update.message.reply_text(
-                    "✅ File cloned successfully!\n\n"
-                    f"Name: <code>{file.get('name')}</code>\n"
-                    f"Size: {file_size}\n"
-                    f"Drive: {drive_name}\n"
-                    f"Link: <code>https://drive.google.com/file/d/{copied_file['id']}/view</code>",
-                    parse_mode='HTML'
-                )
+                try:
+                    # Get user settings
+                    user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
+                    prefix = user_data.get('prefix', '')
+                    suffix = user_data.get('suffix', '')
+                    remnames = user_data.get('remnames', [])
+                    
+                    # Get original file info
+                    file = service.files().get(
+                        fileId=copied_file['id'],
+                        fields='name',
+                        supportsTeamDrives=True
+                    ).execute()
+                    
+                    old_name = file.get('name', '')
+                    
+                    # Get name without extension for processing
+                    if '.' in old_name:
+                        name_part = old_name.rsplit('.', 1)[0]
+                        ext = '.' + old_name.rsplit('.', 1)[1]
+                    else:
+                        name_part = old_name
+                        ext = ''
+                        
+                    new_name = name_part
+                    
+                    # Process remnames first
+                    if remnames:
+                        remnames.sort(key=len, reverse=True)
+                        for remname in remnames:
+                            if remname in new_name:
+                                new_name = new_name.replace(remname, '')
+                    
+                    # Add prefix
+                    if prefix:
+                        new_name = f"{prefix} - {new_name}"
+                        
+                    # Add suffix
+                    if suffix:
+                        new_name = f"{new_name} {suffix}"
+                    
+                    # Clean up multiple spaces
+                    new_name = re.sub(r'\s+', ' ', new_name).strip()
+                    
+                    # Add back extension
+                    final_name = new_name + ext
+                    
+                    # Update file only if name changed
+                    if final_name != old_name:
+                        service.files().update(
+                            fileId=copied_file['id'],
+                            body={'name': final_name},
+                            supportsTeamDrives=True
+                        ).execute()
+                        
+                        # Show rename success message
+                        await update.message.reply_text(
+                            "✅ File renamed successfully!\n\n"
+                            f"Old name: <code>{old_name}</code>\n"
+                            f"New name: <code>{final_name}</code>\n"
+                            f"Size: {file_size}\n"
+                            f"Drive: {drive_name}\n"
+                            f"Link: <code>https://drive.google.com/file/d/{copied_file['id']}/view</code>",
+                            parse_mode='HTML'
+                        )
+                        return
+                        
+                except Exception as e:
+                    print(f"Error in rename process: {e}")
+
+            # Show normal success message (for both no rename and rename failure)
+            await update.message.reply_text(
+                "✅ File cloned successfully!\n\n"
+                f"Name: <code>{file.get('name')}</code>\n"
+                f"Size: {file_size}\n"
+                f"Drive: {drive_name}\n"
+                f"Link: <code>https://drive.google.com/file/d/{copied_file['id']}/view</code>",
+                parse_mode='HTML'
+            )
             
         except Exception as e:
             await update.message.reply_text(
