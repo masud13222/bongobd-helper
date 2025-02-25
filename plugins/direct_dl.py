@@ -85,9 +85,7 @@ async def cleanup(file_path, user_dir):
         print(f"Error in cleanup: {e}")
 
 async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /m command"""
     try:
-        # Check if command has arguments
         if not context.args:
             await update.message.reply_text(
                 "❌ Please provide direct link and drive number!\n\n"
@@ -97,24 +95,20 @@ async def direct_dl_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Create status message first
-        status_msg = await update.message.reply_text("⏳ Starting download...")
-        
         # Create task but don't block
         asyncio.create_task(
-            process_direct_download(update, context, status_msg)
+            process_direct_download(update, context, update.message)
         )
         
     except Exception as e:
         print(f"Error in direct_dl_command: {e}")
         await update.message.reply_text("❌ An error occurred!")
 
-async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_TYPE, status_msg):
-    """Process the actual download"""
-    file_path = None
-    user_dir = None
-    
+async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_TYPE, message):
     try:
+        # Send initial message only once
+        status_msg = await message.reply_text("⏳ Starting download...")
+        
         # Get direct link and check for rename flag
         direct_link = context.args[0]
         should_rename = False
@@ -141,18 +135,9 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                     break
                     
         if not target_folder:
-            await update.message.reply_text("❌ Invalid or unset drive!")
+            await message.reply_text("❌ Invalid or unset drive!")
             return
             
-        # Send initial message
-        status_msg = await update.message.reply_text(
-            "⏳ Starting download..."
-        )
-        
-        # Create user directory
-        user_dir = os.path.join('downloads', str(update.effective_user.id))
-        os.makedirs(user_dir, exist_ok=True)
-        
         # Get filename from URL
         file_name = os.path.basename(direct_link.split('?')[0])
         
@@ -172,7 +157,7 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                     except:
                         pass
         
-        file_path = os.path.join(user_dir, file_name)
+        file_path = os.path.join('downloads', str(update.effective_user.id), file_name)
         
         # Add retry logic for downloads
         max_retries = 3
@@ -184,7 +169,7 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
                 await asyncio.sleep(2)
             else:
                 await status_msg.edit_text("❌ Failed to download file after multiple attempts!")
-                await cleanup(file_path, user_dir)
+                await cleanup(file_path, 'downloads')
                 return
                 
         await status_msg.edit_text("⏳ Uploading to Google Drive...")
@@ -193,18 +178,18 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         service = get_drive_service("token.pickle")
         if not service:
             await status_msg.edit_text("❌ Drive service not available!")
-            await cleanup(file_path, user_dir)
+            await cleanup(file_path, 'downloads')
             return
             
         # Upload to Drive
         file = await upload_to_drive(service, file_path, target_folder, status_msg)
         if not file:
             await status_msg.edit_text("❌ Failed to upload to Drive!")
-            await cleanup(file_path, user_dir)
+            await cleanup(file_path, 'downloads')
             return
             
         # Clean up after successful upload
-        await cleanup(file_path, user_dir)
+        await cleanup(file_path, 'downloads')
         
         # Generate drive link
         file_id = file.get('id')
@@ -227,14 +212,15 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
         
         # After successful upload, handle rename if requested
         if should_rename:
-            # Create new context args for rename
-            new_context = context
-            new_context.args = [drive_link]  # Pass only the drive link
+            # Show upload success first
+            await status_msg.edit_text("✅ File Uploaded Successfully!")
+            await asyncio.sleep(1)
             
-            # Call rename command
+            # Then call rename
+            new_context = context
+            new_context.args = [drive_link]
             await rename_command(update, new_context)
         else:
-            # Send normal success message
             await status_msg.edit_text(
                 "✅ File transferred successfully!\n\n"
                 f"Name: <code>{file.get('name')}</code>\n"
@@ -248,5 +234,5 @@ async def process_direct_download(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         print(f"Error in process_direct_download: {e}")
         await status_msg.edit_text("❌ An error occurred!")
-        if file_path and user_dir:
-            await cleanup(file_path, user_dir) 
+        if file_path:
+            await cleanup(file_path, 'downloads') 

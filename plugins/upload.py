@@ -31,7 +31,6 @@ async def format_speed(speed):
     return await format_size(speed) + "/s"
 
 async def upload_to_drive(service, file_path, folder_id, status_msg):
-    """Upload file to Google Drive with progress"""
     try:
         file_name = os.path.basename(file_path)
         file_size = os.path.getsize(file_path)
@@ -41,10 +40,11 @@ async def upload_to_drive(service, file_path, folder_id, status_msg):
             'parents': [folder_id]
         }
         
+        # Increase chunk size
         media = MediaFileUpload(
             file_path,
             resumable=True,
-            chunksize=1024*1024
+            chunksize=8*1024*1024  # 8MB chunks
         )
         
         # Create drive file
@@ -55,33 +55,45 @@ async def upload_to_drive(service, file_path, folder_id, status_msg):
             fields='id, name'
         )
         
-        # Upload with progress
         response = None
         uploaded = 0
         start_time = time.time()
         last_update_time = 0
+        retries = 0
+        max_retries = 3
         
         while response is None:
-            status, response = request.next_chunk()
-            if status:
-                uploaded = status.resumable_progress
-                current_time = time.time()
-                elapsed = current_time - start_time
-                speed = uploaded / elapsed if elapsed > 0 else 0
-                progress = (uploaded / file_size) * 100
+            try:
+                status, response = request.next_chunk()
+                if status:
+                    uploaded = status.resumable_progress
+                    current_time = time.time()
+                    elapsed = current_time - start_time
+                    speed = uploaded / elapsed if elapsed > 0 else 0
+                    progress = (uploaded / file_size) * 100
+                    
+                    if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
+                        status_text = (
+                            f"📤 Uploading: {file_name}\n"
+                            f"Progress: {progress:.1f}%\n"
+                            f"Size: {await format_size(uploaded)} / {await format_size(file_size)}\n"
+                            f"Speed: {await format_speed(speed)}"
+                        )
+                        await status_msg.edit_text(status_text)
+                        last_update_time = current_time
+                        
+            except Exception as e:
+                print(f"Upload chunk error: {e}")
+                retries += 1
+                if retries > max_retries:
+                    raise Exception(f"Upload failed after {max_retries} retries: {e}")
+                await asyncio.sleep(2)
+                continue
                 
-                # Update status based on interval
-                if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
-                    status_text = (
-                        f"📤 Uploading: {file_name}\n"
-                        f"Progress: {progress:.1f}%\n"
-                        f"Size: {await format_size(uploaded)} / {await format_size(file_size)}\n"
-                        f"Speed: {await format_speed(speed)}"
-                    )
-                    await status_msg.edit_text(status_text)
-                    last_update_time = current_time
-        
+        # Show upload success message
+        await status_msg.edit_text("✅ File Uploaded Successfully!")
         return response
+        
     except Exception as e:
         print(f"Error uploading to Drive: {e}")
         return None
