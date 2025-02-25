@@ -16,17 +16,37 @@ users_collection = db['users']
 def extract_file_id(url):
     """Extract file ID from Google Drive URL"""
     patterns = [
-        r'https://drive\.google\.com/file/d/([-\w]+)',  # File link
-        r'https://drive\.google\.com/drive/folders/([-\w]+)',  # Folder link
-        r'https://drive\.google\.com/drive/d/([-\w]+)',  # Alternate folder link
-        r'([-\w]{33})'  # Direct ID
+        r'/file/d/([a-zA-Z0-9_-]+)',  # File link
+        r'/folders/([a-zA-Z0-9_-]+)',  # Folder link
+        r'id=([a-zA-Z0-9_-]+)',  # Open link
+        r'drive/folders/([a-zA-Z0-9_-]+)',  # Alternative folder link
+        r'^([a-zA-Z0-9_-]+)$'  # Direct ID
     ]
     
+    # Clean the URL
+    url = url.strip()
+    
+    # Try each pattern
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
             return match.group(1)
-    return None
+    
+    # If no pattern matches, try to extract from various URL formats
+    if 'folders' in url:
+        folder_id = url.split('folders/')[-1].split('?')[0].split('/')[0]
+        return folder_id
+        
+    if 'file/d' in url:
+        file_id = url.split('file/d/')[-1].split('?')[0].split('/')[0]
+        return file_id
+        
+    if 'open?id=' in url:
+        file_id = url.split('open?id=')[-1].split('&')[0]
+        return file_id
+    
+    # If nothing works, return cleaned URL
+    return url.split('?')[0].split('&')[0]
 
 async def del_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /del command"""

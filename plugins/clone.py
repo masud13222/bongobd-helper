@@ -26,24 +26,35 @@ def extract_id(url):
     patterns = [
         r'/file/d/([a-zA-Z0-9_-]+)',  # File link
         r'/folders/([a-zA-Z0-9_-]+)',  # Folder link
-        r'drive/folders/([a-zA-Z0-9_-]+)'  # Alternative folder link
+        r'id=([a-zA-Z0-9_-]+)',  # Open link
+        r'drive/folders/([a-zA-Z0-9_-]+)',  # Alternative folder link
+        r'^([a-zA-Z0-9_-]+)$'  # Direct ID
     ]
     
+    # Clean the URL
+    url = url.strip()
+    
+    # Try each pattern
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
             return match.group(1)
-            
-    # If no pattern matches, try to extract from query parameter
+    
+    # If no pattern matches, try to extract from various URL formats
     if 'folders' in url:
-        folder_id = url.split('folders/')[-1].split('?')[0]
+        folder_id = url.split('folders/')[-1].split('?')[0].split('/')[0]
         return folder_id
         
     if 'file/d' in url:
-        file_id = url.split('file/d/')[-1].split('?')[0]
+        file_id = url.split('file/d/')[-1].split('?')[0].split('/')[0]
         return file_id
         
-    return url
+    if 'open?id=' in url:
+        file_id = url.split('open?id=')[-1].split('&')[0]
+        return file_id
+    
+    # If nothing works, return cleaned URL
+    return url.split('?')[0].split('&')[0]
 
 def get_drive_service(token_file):
     """Get Google Drive service for specific account"""
