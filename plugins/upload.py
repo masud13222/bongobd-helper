@@ -44,7 +44,7 @@ async def upload_to_drive(service, file_path, folder_id, status_msg):
         media = MediaFileUpload(
             file_path,
             resumable=True,
-            chunksize=8*1024*1024  # 8MB chunks
+            chunksize=10*1024*1024  # 10MB chunks
         )
         
         # Create drive file

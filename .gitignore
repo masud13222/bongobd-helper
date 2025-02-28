@@ -42,6 +42,7 @@ credentials.json
 
 # Downloads folder
 downloads/
+Docker-QB/
 
 # Database
 *.db

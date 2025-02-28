@@ -11,6 +11,7 @@ from plugins.upload import upload_command
 from plugins.direct_dl import direct_dl_command
 from plugins.delete import del_command
 from plugins.bongodl import bdl_command
+from plugins.mega import mega_command
 import socket
 from threading import Thread
 
@@ -66,6 +67,7 @@ def main():
     application.add_handler(CommandHandler(['m', 'mirror'], direct_dl_command, filters=filters.COMMAND & filters.User(OWNER_IDS)))
     application.add_handler(CommandHandler("del", del_command, filters=filters.COMMAND & filters.User(OWNER_IDS)))
     application.add_handler(CommandHandler("bdl", bdl_command, filters=filters.COMMAND & filters.User(OWNER_IDS)))
+    application.add_handler(CommandHandler("mega", mega_command, filters=filters.COMMAND & filters.User(OWNER_IDS)))
     
     # Add callback handlers
     application.add_handler(CallbackQueryHandler(handle_search_callback, pattern="^(next_page|prev_page|close_search)$"))

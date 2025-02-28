@@ -49,7 +49,7 @@ async def download_file(url, file_path, status_msg):
                 
                 # Increase buffer size for faster downloads
                 async with aiofiles.open(file_path, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(8*1024*1024):  # 8MB chunks
+                    async for chunk in response.content.iter_chunked(10*1024*1024):  # 10MB chunks
                         try:
                             if chunk:  # Filter out empty chunks
                                 await f.write(chunk)
