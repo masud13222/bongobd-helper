@@ -4,8 +4,9 @@ google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 google-api-python-client==2.121.0
 python-dotenv==1.0.1
-aiofiles
-aiohttp>=3.9.1
-aiohttp[speedups]
-yt-dlp
-pycryptodomex
+aiofiles==23.2.1
+aiohttp[speedups]==3.9.1
+yt-dlp==2024.4.9
+pycryptodomex==3.20.0
+pycares==4.1.2
+aiodns==3.0.0
