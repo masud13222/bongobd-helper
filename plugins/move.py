@@ -1,6 +1,6 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CallbackQueryHandler
-from plugins.clone import get_drive_service
+from plugins.clone import get_drive_service, extract_id
 from pymongo import MongoClient
 import os
 import re
@@ -17,232 +17,241 @@ client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 users_collection = db['users']
 
-def extract_folder_id(url):
-    """Extract folder ID from Google Drive URL (same as clone.py)"""
-    
-    patterns = [
-        r'/folders/([a-zA-Z0-9_-]+)',  # Folder link
-        r'id=([a-zA-Z0-9_-]+)',  # Open link
-        r'drive/folders/([a-zA-Z0-9_-]+)',  # Alternative folder link
-        r'^([a-zA-Z0-9_-]+)$'  # Direct ID
-    ]
-    
-    # Clean the URL
-    url = url.strip()
-    
-    # Try each pattern
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    
-    # If no pattern matches, try to extract from various URL formats
-    if 'folders' in url:
-        folder_id = url.split('folders/')[-1].split('?')[0].split('/')[0]
-        return folder_id
-        
-    if 'open?id=' in url:
-        folder_id = url.split('open?id=')[-1].split('&')[0]
-        return folder_id
-    
-    # If nothing works, return cleaned URL
-    return url.split('?')[0].split('&')[0]
-
-def get_drive_status(drive_num, user_data):
-    """Get status emoji for drive"""
-    drive_key = f"drive_{drive_num}"
-    if user_data.get(drive_key):
-        return "✅"
-    return "⭕"
-
-def get_name_status(prefix_key, user_data):
-    """Get status emoji for prefix/suffix"""
-    if user_data.get(prefix_key):
-        return " ✅"
-    return " ⭕"
-
-async def move_files_from_folder(service, source_folder_id, dest_folder_id, status_msg, moved_count=[0]):
-    """Move files from source folder to destination folder"""
-    try:
-        # Get all files in source folder
-        query = f"'{source_folder_id}' in parents and trashed=false"
-        results = service.files().list(
-            q=query,
-            fields='nextPageToken, files(id, name, mimeType, parents)',
-            pageSize=1000,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        
-        items = results.get('files', [])
-        
-        for item in items:
-            try:
-                file_id = item['id']
-                file_name = item['name']
-                current_parents = item.get('parents', [])
-                
-                # Move file to destination folder
-                if current_parents:
-                    # Remove from current parent and add to destination
-                    previous_parents = ','.join(current_parents)
-                    service.files().update(
-                        fileId=file_id,
-                        addParents=dest_folder_id,
-                        removeParents=previous_parents,
-                        supportsAllDrives=True
-                    ).execute()
-                    
-                    moved_count[0] += 1
-                    logger.info(f"Moved file: {file_name} (ID: {file_id})")
-                    
-                    # Update status every 10 files
-                    if moved_count[0] % 10 == 0:
-                        try:
-                            await status_msg.edit_text(f"🔄 Moving files...\n\n📁 Files moved: {moved_count[0]}")
-                        except Exception as e:
-                            logger.warning(f"Error updating status: {e}")
-                            
-                # If it's a folder, recursively move its contents
-                if item.get('mimeType') == 'application/vnd.google-apps.folder':
-                    await move_files_from_folder(service, file_id, dest_folder_id, status_msg, moved_count)
-                    
-            except Exception as e:
-                logger.error(f"Error moving file {item.get('name', 'Unknown')}: {e}")
-                continue
-                
-    except Exception as e:
-        logger.error(f"Error listing files from folder {source_folder_id}: {e}")
-        
-    return moved_count[0]
+def format_size(size):
+    """Format size in bytes to human readable"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} TB"
 
 async def move_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /m command for moving files"""
     try:
         logger.info(f"Move command received from user {update.effective_user.id}")
         
-        # Get user data
+        # Check if command has arguments
+        if not context.args:
+            # Get user's drive settings to show available drives
+            user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
+            
+            # Build help message with available drives
+            help_msg = "❌ Invalid format!\n\nUse:\n"
+            for i in range(1, 11):  # Check all 10 drives
+                drive_key = f'drive_{i:02d}'
+                if user_data.get(drive_key):
+                    drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
+                    help_msg += f"• /m <file_link> -d{i} - Move to {drive_name}\n"
+                    help_msg += f"• /m <file_link> -d{i} -r - Move and auto rename\n"
+            
+            if len(help_msg) == 27:  # Only has header
+                help_msg += "\nNo drives set! Use /uset command to set drive folders first."
+                
+            await update.message.reply_text(help_msg)
+            return
+            
+        # Check for rename flag
+        should_rename = False
+        if '-r' in context.args:
+            should_rename = True
+            # Remove -r from args
+            context.args = [arg for arg in context.args if arg != '-r']
+            
+        # Get file ID from URL
+        file_id = extract_id(context.args[0])
+        
+        # Get user's drive settings
         user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
         
-        if len(context.args) < 2:
-            # Show help message
-            help_text = (
-                "🔄 **Move Files Command**\n\n"
-                "**Usage:** `/m <source_folder_link> <destination_drive_number>`\n\n"
-                "**Examples:**\n"
-                "• `/m https://drive.google.com/drive/folders/SOURCE_ID 1`\n"
-                "• `/m https://drive.google.com/open?id=SOURCE_ID 2`\n"
-                "• `/m SOURCE_FOLDER_ID 3`\n\n"
-                "This will move all files from the source folder to your selected drive.\n\n"
-                "**Note:** You must have access to the source folder and destination drive must be set in `/uset`."
-            )
-            await update.message.reply_text(help_text, parse_mode='Markdown')
-            return
-        
-        # Parse arguments - ignore extra flags like -r or -d2
-        source_input = context.args[0]
-        
-        # Find the drive number - could be second argument or in -d format
-        dest_drive_num = None
-        for arg in context.args[1:]:
-            if arg.startswith('-d'):
-                # Extract number from -d2 format
-                dest_drive_num = arg[2:]
-                break
-            elif arg.isdigit():
-                # Direct number format
-                dest_drive_num = arg
-                break
-        
-        if not dest_drive_num:
-            dest_drive_num = context.args[1]
-        
-        # Extract folder ID from URL using same logic as clone.py
-        source_folder_id = extract_folder_id(source_input)
-            
-        # Validate destination drive
-        try:
-            drive_num = int(dest_drive_num)
-            if drive_num < 1 or drive_num > 10:
-                await update.message.reply_text("❌ Drive number must be between 1 and 10!")
+        # Check which drive to use
+        target_folder = None
+        drive_name = None
+        if len(context.args) > 1:
+            drive_flag = context.args[1].lower()
+            # Check for drive flags d1 to d10
+            for i in range(1, 11):
+                drive_key = f'drive_{i:02d}'
+                if drive_flag == f"-d{i}" and user_data.get(drive_key):
+                    target_folder = user_data[drive_key]
+                    drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
+                    break
+                    
+            if not target_folder:
+                # Show available drives
+                help_msg = "❌ Invalid or unset drive!\n\nAvailable drives:\n"
+                for i in range(1, 11):
+                    drive_key = f'drive_{i:02d}'
+                    if user_data.get(drive_key):
+                        drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
+                        help_msg += f"• -d{i} ({drive_name})\n"
+                await update.message.reply_text(help_msg)
                 return
-        except ValueError:
-            await update.message.reply_text("❌ Invalid drive number!")
+        else:
+            # Use first available drive
+            for i in range(1, 11):
+                drive_key = f'drive_{i:02d}'
+                if user_data.get(drive_key):
+                    target_folder = user_data[drive_key]
+                    drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
+                    break
+                
+        # Check if any drive is set
+        if not target_folder:
+            await update.message.reply_text(
+                "❌ No drives set!\n\n"
+                "Use /uset command to set drive folders first."
+            )
             return
-            
-        # Get destination folder
-        drive_key = f'drive_{drive_num:02d}'
-        dest_folder_id = user_data.get(drive_key)
-        drive_name = user_data.get(f'{drive_key}_name', f'Drive {drive_num:02d}')
-        
-        if not dest_folder_id:
-            await update.message.reply_text(f"❌ Drive {drive_num} is not set! Use `/uset` to configure drives first.")
-            return
-            
-        # Create status message
-        status_msg = await update.message.reply_text("🔄 Starting file move operation...\n\n⏳ Initializing...")
-        
+                
         # Get Drive service
         service = get_drive_service("token.pickle")
         if not service:
-            await status_msg.edit_text("❌ Google Drive service not available!")
+            await update.message.reply_text("❌ Error: Drive service not available")
             return
             
         try:
-            # Verify source folder exists and is accessible
-            source_folder = service.files().get(
-                fileId=source_folder_id,
-                fields='name, mimeType',
+            # Get file metadata including current parent
+            file = service.files().get(
+                fileId=file_id,
+                fields='name, parents, mimeType',
                 supportsAllDrives=True
             ).execute()
             
-            source_name = source_folder.get('name', 'Unknown Folder')
+            file_name = file.get('name', 'Unknown File')
+            current_parents = file.get('parents', [])
+            file_mime_type = file.get('mimeType', '')
             
-            if source_folder.get('mimeType') != 'application/vnd.google-apps.folder':
-                await status_msg.edit_text("❌ Source must be a folder!")
+            # Check if it's a file (not folder)
+            if file_mime_type == 'application/vnd.google-apps.folder':
+                await update.message.reply_text("❌ This is a folder! Use this command for files only.")
                 return
-                
-        except Exception as e:
-            logger.error(f"Error accessing source folder: {e}")
-            await status_msg.edit_text("❌ Cannot access source folder! Check permissions and folder ID.")
-            return
             
-        try:
-            # Verify destination folder exists
-            dest_folder = service.files().get(
-                fileId=dest_folder_id,
-                fields='name',
+            # Create status message
+            status_msg = await update.message.reply_text(f"🔄 Moving file: {file_name}...")
+            
+            # Move file to destination folder
+            if current_parents:
+                # Remove from current parent and add to destination
+                previous_parents = ','.join(current_parents)
+                moved_file = service.files().update(
+                    fileId=file_id,
+                    addParents=target_folder,
+                    removeParents=previous_parents,
+                    supportsAllDrives=True
+                ).execute()
+            else:
+                # If no current parents, just add to destination
+                moved_file = service.files().update(
+                    fileId=file_id,
+                    addParents=target_folder,
+                    supportsAllDrives=True
+                ).execute()
+            
+            logger.info(f"File moved successfully: {file_name} (ID: {file_id})")
+            
+            # Get updated file info
+            file = service.files().get(
+                fileId=file_id,
+                fields='name, size',
                 supportsAllDrives=True
             ).execute()
             
-        except Exception as e:
-            logger.error(f"Error accessing destination folder: {e}")
-            await status_msg.edit_text("❌ Cannot access destination folder!")
-            return
+            file_size = format_size(int(file.get('size', 0)))
             
-        # Start moving files
-        await status_msg.edit_text(f"🔄 Moving files...\n\n📂 Source: {source_name}\n📁 Destination: {drive_name}\n\n⏳ Please wait...")
-        
-        # Move all files from source to destination
-        total_moved = await move_files_from_folder(service, source_folder_id, dest_folder_id, status_msg)
-        
-        # Final success message
-        await status_msg.edit_text(
-            f"✅ **Move operation completed!**\n\n"
-            f"📂 **Source:** {source_name}\n"
-            f"📁 **Destination:** {drive_name}\n"
-            f"📊 **Files moved:** {total_moved}\n\n"
-            f"🔗 **Destination Link:** https://drive.google.com/drive/folders/{dest_folder_id}"
-        )
-        
-        logger.info(f"Move operation completed. Moved {total_moved} files from {source_folder_id} to {dest_folder_id}")
-        
+            # Generate drive link
+            drive_link = f"https://drive.google.com/file/d/{file_id}/view"
+            
+            # Create view button
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 View File", url=drive_link)]
+            ])
+            
+            # After successful move, handle rename if requested
+            if should_rename:
+                try:
+                    # Get user settings
+                    user_data = users_collection.find_one({"user_id": update.effective_user.id}) or {}
+                    prefix = user_data.get('prefix', '')
+                    suffix = user_data.get('suffix', '')
+                    remnames = user_data.get('remnames', [])
+                    
+                    old_name = file.get('name', '')
+                    
+                    # Get name without extension for processing
+                    if '.' in old_name:
+                        name_part = old_name.rsplit('.', 1)[0]
+                        ext = '.' + old_name.rsplit('.', 1)[1]
+                    else:
+                        name_part = old_name
+                        ext = ''
+                        
+                    new_name = name_part
+                    
+                    # Process remnames first
+                    if remnames:
+                        remnames.sort(key=len, reverse=True)
+                        for remname in remnames:
+                            if remname in new_name:
+                                new_name = new_name.replace(remname, '')
+                    
+                    # Add prefix
+                    if prefix:
+                        new_name = f"{prefix} - {new_name}"
+                        
+                    # Add suffix
+                    if suffix:
+                        new_name = f"{new_name} {suffix}"
+                    
+                    # Clean up multiple spaces
+                    new_name = re.sub(r'\s+', ' ', new_name).strip()
+                    
+                    # Add back extension
+                    final_name = new_name + ext
+                    
+                    # Update file only if name changed
+                    if final_name != old_name:
+                        service.files().update(
+                            fileId=file_id,
+                            body={'name': final_name},
+                            supportsAllDrives=True
+                        ).execute()
+                        
+                        await status_msg.edit_text(
+                            "✅ File moved and renamed successfully!\n\n"
+                            f"Old name: <code>{old_name}</code>\n"
+                            f"New name: <code>{final_name}</code>\n"
+                            f"Size: {file_size}\n"
+                            f"Drive: {drive_name}\n"
+                            f"Link: <code>{drive_link}</code>",
+                            parse_mode='HTML',
+                            reply_markup=keyboard
+                        )
+                        return
+                        
+                except Exception as e:
+                    logger.error(f"Error in rename process: {e}")
+            
+            # Send success message
+            await status_msg.edit_text(
+                "✅ File moved successfully!\n\n"
+                f"Name: <code>{file.get('name')}</code>\n"
+                f"Size: {file_size}\n"
+                f"Drive: {drive_name}\n"
+                f"Link: <code>{drive_link}</code>",
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
+            
+        except Exception as e:
+            logger.error(f"Error moving file: {e}")
+            await update.message.reply_text(
+                f"❌ Error: Could not move file\n"
+                f"Reason: {str(e)}"
+            )
+            
     except Exception as e:
         logger.exception(f"Error in move_command: {e}")
-        try:
-            await update.message.reply_text(f"❌ An error occurred: {str(e)}")
-        except:
-            pass
+        await update.message.reply_text("❌ An error occurred. Please try again.")
 
 async def show_move_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show interactive move menu"""
@@ -259,7 +268,7 @@ async def show_move_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 drive_num = i + j
                 if drive_num <= 10:
                     drive_key = f'drive_{drive_num:02d}'
-                    status = get_drive_status(f'{drive_num:02d}', user_data)
+                    status = "✅" if user_data.get(drive_key) else "⭕"
                     drive_name = user_data.get(f'{drive_key}_name', f'Drive {drive_num:02d}')
                     row.append(InlineKeyboardButton(
                         f"{status} {drive_name}", 
@@ -276,7 +285,7 @@ async def show_move_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_text = (
             "🔄 **File Move Tool**\n\n"
             "Select a destination drive below, then send:\n"
-            "`/m <folder_link_or_id> <drive_number>`\n\n"
+            "`/m <file_link> -d<drive_number>`\n\n"
             "**Available Drives:**"
         )
         
@@ -305,19 +314,19 @@ async def move_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if query.data == "move_help":
             help_text = (
                 "🔄 **Move Files Help**\n\n"
-                "**Command:** `/m <source> <destination_drive>`\n\n"
+                "**Command:** `/m <file_link> -d<drive_number>`\n\n"
                 "**Examples:**\n"
-                "• `/m https://drive.google.com/drive/folders/1ABC...XYZ 1`\n"
-                "• `/m 1ABC2DEF3GHI4JKL5MNO6PQR 2`\n\n"
+                "• `/m https://drive.google.com/file/d/1ABC...XYZ -d1`\n"
+                "• `/m https://drive.google.com/open?id=1ABC...XYZ -d2`\n"
+                "• `/m 1ABC2DEF3GHI4JKL5MNO6PQR -d3`\n\n"
                 "**Features:**\n"
-                "• Move all files from any folder to your drives\n"
-                "• Preserves folder structure\n"
-                "• Batch processing for efficiency\n"
-                "• Real-time progress updates\n\n"
+                "• Move individual files between drives\n"
+                "• Auto-rename with prefix/suffix (use -r flag)\n"
+                "• Real-time status updates\n\n"
                 "**Requirements:**\n"
-                "• Source folder must be accessible\n"
+                "• You need edit access to the file\n"
                 "• Destination drive must be set in `/uset`\n"
-                "• You need edit access to both folders"
+                "• Works with individual files only (not folders)"
             )
             await query.edit_message_text(help_text, parse_mode='Markdown')
             
@@ -325,8 +334,8 @@ async def move_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
             drive_num = query.data.split("_")[2]
             await query.edit_message_text(
                 f"✅ **Drive {drive_num} selected!**\n\n"
-                f"Now send:\n`/m <folder_link> {drive_num}`\n\n"
-                f"Example:\n`/m https://drive.google.com/drive/folders/SOURCE_ID {drive_num}`",
+                f"Now send:\n`/m <file_link> -d{drive_num}`\n\n"
+                f"Example:\n`/m https://drive.google.com/open?id=FILE_ID -d{drive_num}`",
                 parse_mode='Markdown'
             )
             

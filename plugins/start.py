@@ -29,10 +29,10 @@ HELP_TEXT = """
   Format: /list folder_link
 
 � <b>Move Command:</b>
-• /m - Move files between folders
-  Format: /m source_folder destination_drive
-  Example: /m https://drive.google.com/open?id=xxx 1
-  Example: /m https://drive.google.com/drive/folders/xxx 2
+• /m - Move individual files between drives
+  Format: /m file_link -d<drive_number>
+  Example: /m https://drive.google.com/open?id=xxx -d1
+  Example: /m https://drive.google.com/file/d/xxx -d2
 
 � <b>Download Commands:</b>
 • /mirror - Mirror direct download links
@@ -55,7 +55,7 @@ HELP_TEXT = """
 <b>Drive Numbers (-d1 to -d10):</b>
 Configure drive folders in /uset first
 Then use -d1 to -d10 to select target drive
-For /m command, use drive numbers 1-10 (without -d prefix)
+For /m command, use -d1 to -d10 format (same as other commands)
 
 <b>Note:</b> Only bot owners can use these commands
 """
@@ -90,6 +90,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'm a Clone Bot that can help you manage and clone files between Google Drives.\n\n"
         "🔑 <b>Main Features:</b>\n"
         "• Clone files between drives\n"
+        "• Move files between drives\n"
         "• Upload files to drive\n" 
         "• Mirror direct links\n"
         "• Download from BongoBD\n"
