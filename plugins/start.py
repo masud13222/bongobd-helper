@@ -28,10 +28,16 @@ HELP_TEXT = """
 • /list - List files in drive folder
   Format: /list folder_link
 
-📥 <b>Download Commands:</b>
-• /m or /mirror - Mirror direct download links
-  Format: /m direct_link -d1
-  Example: /m https://example.com/file.zip -d1
+� <b>Move Command:</b>
+• /m - Move individual files between drives
+  Format: /m file_link -d<drive_number>
+  Example: /m https://drive.google.com/open?id=xxx -d1
+  Example: /m https://drive.google.com/file/d/xxx -d2
+
+� <b>Download Commands:</b>
+• /mirror - Mirror direct download links
+  Format: /mirror direct_link -d1
+  Example: /mirror https://example.com/file.zip -d1
 
 • /bdl - Download from BongoBD
   Format: /bdl bongo_link -n filename -d1
@@ -46,9 +52,10 @@ HELP_TEXT = """
   Format: /r new_name
   Note: Reply to a message with file
 
-<b>Drive Numbers (-d1 to -d6):</b>
+<b>Drive Numbers (-d1 to -d10):</b>
 Configure drive folders in /uset first
-Then use -d1 to -d6 to select target drive
+Then use -d1 to -d10 to select target drive
+For /m command, use -d1 to -d10 format (same as other commands)
 
 <b>Note:</b> Only bot owners can use these commands
 """
@@ -83,6 +90,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'm a Clone Bot that can help you manage and clone files between Google Drives.\n\n"
         "🔑 <b>Main Features:</b>\n"
         "• Clone files between drives\n"
+        "• Move files between drives\n"
         "• Upload files to drive\n" 
         "• Mirror direct links\n"
         "• Download from BongoBD\n"

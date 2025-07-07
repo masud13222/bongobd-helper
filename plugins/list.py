@@ -48,17 +48,18 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         try:
-            # Search files
-            page_token = context.user_data.get('page_token')
+            # Clear previous search data to start fresh
+            context.user_data.pop('page_token', None)
+            context.user_data.pop('prev_tokens', None)
+            context.user_data.pop('current_page', None)
             
             # Build search query
             search_query = f"name contains '{query}' and trashed = false"
             
-            # Get files
+            # Get files - start fresh without pageToken
             results = service.files().list(
                 q=search_query,
                 fields="nextPageToken, files(id, name, mimeType)",
-                pageToken=page_token,
                 pageSize=7,
                 orderBy='name',
                 supportsAllDrives=True,
@@ -94,17 +95,15 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if next_page_token:  # Has next page
                 buttons.append(InlineKeyboardButton("Next ➡️", callback_data="next_page"))
                 
-            if page_token:  # Not first page
-                buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data="prev_page"))
-                
             buttons.append(InlineKeyboardButton("❌ Close", callback_data="close_search"))
             
             keyboard = InlineKeyboardMarkup([buttons])
             
-            # Save tokens in user_data
-            context.user_data['prev_token'] = page_token
-            context.user_data['next_token'] = next_page_token
+            # Save tokens and search info in user_data with better structure
             context.user_data['search_query'] = query
+            context.user_data['current_page'] = 0
+            context.user_data['prev_tokens'] = []  # Stack of previous page tokens
+            context.user_data['next_token'] = next_page_token
             
             await update.message.reply_text(
                 text,
@@ -114,9 +113,15 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             
         except Exception as e:
-            await update.message.reply_text(
-                f"❌ Error searching files:\n{str(e)}"
-            )
+            error_msg = str(e)
+            if "Invalid Value" in error_msg and "pageToken" in error_msg:
+                await update.message.reply_text(
+                    "❌ Search session expired. Please try your search again."
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Error searching files:\n{error_msg}"
+                )
             
     except Exception as e:
         print(f"Error in list_command: {e}")
@@ -128,23 +133,25 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     try:
         if query.data == "close_search":
+            # Clear search data
+            context.user_data.pop('search_query', None)
+            context.user_data.pop('current_page', None)
+            context.user_data.pop('prev_tokens', None)
+            context.user_data.pop('next_token', None)
             await query.message.delete()
             await query.answer()
             return
             
         # Get saved data
         search_query = context.user_data.get('search_query')
+        current_page = context.user_data.get('current_page', 0)
+        prev_tokens = context.user_data.get('prev_tokens', [])
+        next_token = context.user_data.get('next_token')
         
         if not search_query:
             await query.answer("❌ Search expired! Please search again.")
             await query.message.delete()
             return
-            
-        # Update page token based on button
-        if query.data == "next_page":
-            context.user_data['page_token'] = context.user_data.get('next_token')
-        elif query.data == "prev_page":
-            context.user_data['page_token'] = context.user_data.get('prev_token')
             
         # Get Drive service
         service = get_drive_service()
@@ -153,6 +160,38 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
             return
             
         try:
+            # Determine which page token to use
+            page_token = None
+            new_page = current_page
+            
+            if query.data == "next_page":
+                if next_token:
+                    # Save current position before moving forward
+                    if current_page == 0:
+                        prev_tokens.append(None)  # First page has no token
+                    else:
+                        # This shouldn't happen in normal flow, but just in case
+                        pass
+                    page_token = next_token
+                    new_page = current_page + 1
+                else:
+                    await query.answer("No more pages available")
+                    return
+                    
+            elif query.data == "prev_page":
+                if current_page > 0 and len(prev_tokens) >= current_page:
+                    new_page = current_page - 1
+                    if new_page == 0:
+                        page_token = None  # First page
+                    else:
+                        # For going back multiple pages, we'd need more complex logic
+                        # For now, let's restart the search
+                        page_token = None
+                        new_page = 0
+                else:
+                    await query.answer("Already at first page")
+                    return
+                    
             # Build search query
             search_query_text = f"name contains '{search_query}' and trashed = false"
             
@@ -160,7 +199,7 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
             results = service.files().list(
                 q=search_query_text,
                 fields="nextPageToken, files(id, name, mimeType)",
-                pageToken=context.user_data.get('page_token'),
+                pageToken=page_token,
                 pageSize=7,
                 orderBy='name',
                 supportsAllDrives=True,
@@ -177,7 +216,10 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
                 return
                 
             # Build message text
-            text = f"🔍 Search results for: <code>{search_query}</code>\n\n"
+            text = f"🔍 Search results for: <code>{search_query}</code>\n"
+            if new_page > 0:
+                text += f"(Page {new_page + 1})\n"
+            text += "\n"
             
             for i, item in enumerate(items, 1):
                 name = item.get('name', 'Unknown')
@@ -197,16 +239,18 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
             if next_page_token:  # Has next page
                 buttons.append(InlineKeyboardButton("Next ➡️", callback_data="next_page"))
                 
-            if context.user_data.get('page_token'):  # Not first page
+            if new_page > 0:  # Not first page
                 buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data="prev_page"))
                 
             buttons.append(InlineKeyboardButton("❌ Close", callback_data="close_search"))
             
             keyboard = InlineKeyboardMarkup([buttons])
             
-            # Save tokens
-            context.user_data['prev_token'] = context.user_data.get('page_token')
+            # Update context data
+            context.user_data['current_page'] = new_page
             context.user_data['next_token'] = next_page_token
+            if query.data == "next_page":
+                context.user_data['prev_tokens'] = prev_tokens
             
             # Edit message
             await query.message.edit_text(
@@ -218,8 +262,18 @@ async def handle_search_callback(update: Update, context: ContextTypes.DEFAULT_T
             await query.answer()
             
         except Exception as e:
+            error_msg = str(e)
             print(f"Error in pagination: {e}")
-            await query.answer("❌ Error occurred!")
+            if "Invalid Value" in error_msg and "pageToken" in error_msg:
+                await query.answer("❌ Search session expired. Please start a new search.")
+                await query.message.delete()
+                # Clear search data
+                context.user_data.pop('search_query', None)
+                context.user_data.pop('current_page', None)
+                context.user_data.pop('prev_tokens', None)
+                context.user_data.pop('next_token', None)
+            else:
+                await query.answer("❌ Error occurred!")
             
     except Exception as e:
         print(f"Error in handle_search_callback: {e}")
