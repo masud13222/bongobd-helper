@@ -8,7 +8,17 @@ from plugins.rename import rename_command
 from plugins.clone import clone_command
 from plugins.list import list_command, handle_search_callback
 from plugins.upload import upload_command
-from plugins.direct_dl import direct_dl_command
+try:
+    from plugins.direct_dl import direct_dl_command
+except ImportError as e:
+    print(f"Warning: aiohttp direct_dl plugin failed to load: {e}")
+    print("Using requests fallback for direct download...")
+    try:
+        from plugins.direct_dl_backup import direct_dl_command_requests as direct_dl_command
+    except ImportError:
+        print("Fallback also failed, creating dummy function...")
+        async def direct_dl_command(update, context):
+            await update.message.reply_text("❌ Direct download feature temporarily unavailable due to dependency issues!")
 from plugins.delete import del_command
 from plugins.bongodl import bdl_command
 from plugins.mega import mega_command

@@ -5,7 +5,8 @@ google-auth-httplib2
 google-api-python-client
 python-dotenv
 aiofiles
-aiohttp[speedups]
+aiohttp==3.7.4
+requests
 yt-dlp
 pycryptodomex
 pycares
