@@ -347,7 +347,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data = users_collection.find_one({"user_id": user_id}) or {}
         
         # Update drive statuses to show folder names
-        for i in range(1, 7):
+        for i in range(1, 11):
             drive_num = f"{i:02d}"
             drive_key = f"drive_{drive_num}"
             name_key = f"drive_{drive_num}_name"
@@ -385,6 +385,14 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [
                 InlineKeyboardButton(f"Drive 05 {get_drive_status('05', user_data)}", callback_data="drive_05"),
                 InlineKeyboardButton(f"Drive 06 {get_drive_status('06', user_data)}", callback_data="drive_06"),
+            ],
+            [
+                InlineKeyboardButton(f"Drive 07 {get_drive_status('07', user_data)}", callback_data="drive_07"),
+                InlineKeyboardButton(f"Drive 08 {get_drive_status('08', user_data)}", callback_data="drive_08"),
+            ],
+            [
+                InlineKeyboardButton(f"Drive 09 {get_drive_status('09', user_data)}", callback_data="drive_09"),
+                InlineKeyboardButton(f"Drive 10 {get_drive_status('10', user_data)}", callback_data="drive_10"),
             ],
             [
                 InlineKeyboardButton(f"Prename{get_name_status('prefix', user_data)}", callback_data="prename"),
@@ -431,6 +439,14 @@ async def uset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton(f"Drive 06 {get_drive_status('06', user_data)}", callback_data="drive_06"),
             ],
             [
+                InlineKeyboardButton(f"Drive 07 {get_drive_status('07', user_data)}", callback_data="drive_07"),
+                InlineKeyboardButton(f"Drive 08 {get_drive_status('08', user_data)}", callback_data="drive_08"),
+            ],
+            [
+                InlineKeyboardButton(f"Drive 09 {get_drive_status('09', user_data)}", callback_data="drive_09"),
+                InlineKeyboardButton(f"Drive 10 {get_drive_status('10', user_data)}", callback_data="drive_10"),
+            ],
+            [
                 InlineKeyboardButton(f"Prename{get_name_status('prefix', user_data)}", callback_data="prename"),
                 InlineKeyboardButton(f"Surfname{get_name_status('suffix', user_data)}", callback_data="surfname"),
             ],
@@ -443,7 +459,7 @@ async def uset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status_text = "🔧 Current Settings:\n\n"
         
         # Add drive statuses
-        for i in range(1, 7):
+        for i in range(1, 11):
             drive_num = f"{i:02d}"
             drive_key = f"drive_{drive_num}"
             name_key = f"drive_{drive_num}_name"
