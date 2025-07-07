@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes, CallbackQueryHandler
 from plugins.clone import get_drive_service
 from pymongo import MongoClient
 import os
+import re
 import logging
 
 # Set up logging
@@ -15,6 +16,37 @@ DB_NAME = os.getenv('DB_NAME')
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 users_collection = db['users']
+
+def extract_folder_id(url):
+    """Extract folder ID from Google Drive URL (same as clone.py)"""
+    
+    patterns = [
+        r'/folders/([a-zA-Z0-9_-]+)',  # Folder link
+        r'id=([a-zA-Z0-9_-]+)',  # Open link
+        r'drive/folders/([a-zA-Z0-9_-]+)',  # Alternative folder link
+        r'^([a-zA-Z0-9_-]+)$'  # Direct ID
+    ]
+    
+    # Clean the URL
+    url = url.strip()
+    
+    # Try each pattern
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    
+    # If no pattern matches, try to extract from various URL formats
+    if 'folders' in url:
+        folder_id = url.split('folders/')[-1].split('?')[0].split('/')[0]
+        return folder_id
+        
+    if 'open?id=' in url:
+        folder_id = url.split('open?id=')[-1].split('&')[0]
+        return folder_id
+    
+    # If nothing works, return cleaned URL
+    return url.split('?')[0].split('&')[0]
 
 def get_drive_status(drive_num, user_data):
     """Get status emoji for drive"""
@@ -99,26 +131,34 @@ async def move_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "**Usage:** `/m <source_folder_link> <destination_drive_number>`\n\n"
                 "**Examples:**\n"
                 "• `/m https://drive.google.com/drive/folders/SOURCE_ID 1`\n"
-                "• `/m SOURCE_FOLDER_ID 2`\n\n"
+                "• `/m https://drive.google.com/open?id=SOURCE_ID 2`\n"
+                "• `/m SOURCE_FOLDER_ID 3`\n\n"
                 "This will move all files from the source folder to your selected drive.\n\n"
                 "**Note:** You must have access to the source folder and destination drive must be set in `/uset`."
             )
             await update.message.reply_text(help_text, parse_mode='Markdown')
             return
-            
-        source_input = context.args[0]
-        dest_drive_num = context.args[1]
         
-        # Extract folder ID from URL or use as-is if it's already an ID
-        if 'drive.google.com' in source_input:
-            # Extract folder ID from URL
-            if '/folders/' in source_input:
-                source_folder_id = source_input.split('/folders/')[1].split('?')[0].split('/')[0]
-            else:
-                await update.message.reply_text("❌ Invalid Google Drive folder URL!")
-                return
-        else:
-            source_folder_id = source_input
+        # Parse arguments - ignore extra flags like -r or -d2
+        source_input = context.args[0]
+        
+        # Find the drive number - could be second argument or in -d format
+        dest_drive_num = None
+        for arg in context.args[1:]:
+            if arg.startswith('-d'):
+                # Extract number from -d2 format
+                dest_drive_num = arg[2:]
+                break
+            elif arg.isdigit():
+                # Direct number format
+                dest_drive_num = arg
+                break
+        
+        if not dest_drive_num:
+            dest_drive_num = context.args[1]
+        
+        # Extract folder ID from URL using same logic as clone.py
+        source_folder_id = extract_folder_id(source_input)
             
         # Validate destination drive
         try:
