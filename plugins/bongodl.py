@@ -57,7 +57,7 @@ async def download_bongo(url, file_path, status_msg):
         )
         
         # Variables for progress tracking
-        last_update_time = 0
+        last_update_time = [0]  # Use list to make it mutable in nested function
         
         # Monitor download progress
         stdout_lines = []
@@ -75,13 +75,13 @@ async def download_bongo(url, file_path, status_msg):
                 
                 # Update status based on progress
                 current_time = time.time()
-                if current_time - last_update_time >= PROGRESS_UPDATE_INTERVAL:
+                if current_time - last_update_time[0] >= PROGRESS_UPDATE_INTERVAL:
                     if '[' in output and '%' in output:
                         try:
                             # Extract progress info from the custom template
                             progress_text = f"📥 Downloading: {file_name}\n{output}"
                             await status_msg.edit_text(progress_text)
-                            last_update_time = current_time
+                            last_update_time[0] = current_time
                         except Exception as e:
                             logger.warning(f"Error updating progress: {e}")
                 
