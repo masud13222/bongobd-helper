@@ -153,7 +153,7 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Build help message with available drives
             help_msg = "❌ Invalid format!\n\nUse:\n"
-            for i in range(1, 7):  # Check all 6 drives
+            for i in range(1, 11):  # Check all 10 drives
                 drive_key = f'drive_{i:02d}'
                 if user_data.get(drive_key):
                     drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
@@ -184,8 +184,8 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         drive_name = None
         if len(context.args) > 1:
             drive_flag = context.args[1].lower()
-            # Check for drive flags d1 to d6
-            for i in range(1, 7):
+            # Check for drive flags d1 to d10
+            for i in range(1, 11):
                 drive_key = f'drive_{i:02d}'
                 if drive_flag == f"-d{i}" and user_data.get(drive_key):
                     target_folder = user_data[drive_key]
@@ -195,7 +195,7 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not target_folder:
                 # Show available drives
                 help_msg = "❌ Invalid or unset drive!\n\nAvailable drives:\n"
-                for i in range(1, 7):
+                for i in range(1, 11):
                     drive_key = f'drive_{i:02d}'
                     if user_data.get(drive_key):
                         drive_name = user_data.get(f'{drive_key}_name', f'Drive {i:02d}')
@@ -204,7 +204,7 @@ async def clone_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         else:
             # Use first available drive
-            for i in range(1, 7):
+            for i in range(1, 11):
                 drive_key = f'drive_{i:02d}'
                 if user_data.get(drive_key):
                     target_folder = user_data[drive_key]

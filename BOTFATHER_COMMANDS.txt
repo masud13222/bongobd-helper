@@ -1,0 +1,13 @@
+start - Start the bot and see main features
+help - Show all available commands and usage
+uset - Configure drive settings and folders
+c - Clone files between drives
+clone - Clone files between drives
+m - Move files between drives  
+list - List files in drive folder
+mirror - Mirror direct download links
+bdl - Download from BongoBD streaming links
+del - Delete files from drive
+r - Rename files with prefix/suffix
+rename - Rename files with prefix/suffix
+mega - Download from MEGA links
